@@ -1,0 +1,93 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ebpf-cost-saver
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ebpf-cost-saver
+  namespace: ebpf-cost-saver
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ebpf-cost-saver-node-reader
+rules:
+  # Core API: list/get/watch nodes (for node count & capacity)
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+  # metrics.k8s.io: list/get/watch node usage (for avg CPU/mem)
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ebpf-cost-saver-node-reader-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: ebpf-cost-saver-node-reader
+subjects:
+- kind: ServiceAccount
+  name: ebpf-cost-saver
+  namespace: ebpf-cost-saver
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ebpf-cost-saver
+  namespace: ebpf-cost-saver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ebpf-cost-saver
+  template:
+    metadata:
+      labels:
+        app: ebpf-cost-saver
+    spec:
+      serviceAccountName: ebpf-cost-saver
+      containers:
+        - name: app
+          image: wsearle/ebpf-cost-saver:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ebpf-cost-saver
+  namespace: ebpf-cost-saver
+spec:
+  selector:
+    app: ebpf-cost-saver
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
